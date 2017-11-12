@@ -68,6 +68,11 @@ func (db *Database) Connect() *sql.DB {
 
 	log.IfError(err)
 
+	if err == nil {
+		err = db.conn.Ping()
+		log.IfError(err)
+	}
+
 	return db.conn
 
 }
