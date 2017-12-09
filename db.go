@@ -2,7 +2,7 @@ package db
 
 import (
 	"database/sql"
-	// "errors"
+	"errors"
 	"fmt"
 
 	"github.com/DATA-DOG/go-sqlmock"
@@ -118,13 +118,24 @@ func Conn(id string) *sql.DB {
 func Check(id string) error {
 	conn := Conn(id)
 
-	rows, err := conn.Query(`SELECT NOW()`)
-	defer rows.Close()
-	log.IfError(err)
-
-	if err == nil {
-		log.Notice("Successfully connected to DB ID:", id)
+	if conn == nil {
+		return errors.New("Connection is nil")
 	}
+
+	err := conn.Ping()
+	if err != nil {
+		log.IfError(err)
+		return err
+	}
+
+	rows, err := conn.Query(`SELECT NOW()`)
+	if err != nil {
+		log.IfError(err)
+		return err
+	}
+	defer rows.Close()
+
+	log.Notice("Successfully connected to DB ID:", id)
 
 	return err
 
