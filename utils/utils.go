@@ -72,6 +72,9 @@ func NullStringToTime(str *sql.NullString) time.Time {
 
 func NullStringToTimePtr(str *sql.NullString) *time.Time {
 	t := NullStringToTime(str)
+	if t.Year() == 1 {
+		return nil
+	}
 	return &t
 }
 
