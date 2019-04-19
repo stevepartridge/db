@@ -5,11 +5,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/DATA-DOG/go-sqlmock"
+	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/jmoiron/sqlx"
 	_ "github.com/lib/pq"
-
-	"github.com/propervillains/log"
 )
 
 type Database struct {
@@ -66,11 +65,13 @@ func (db *Database) Connect() *sql.DB {
 
 	}
 
-	log.IfError(err)
+	ifError(err)
 
 	if err == nil {
 		err = db.conn.Ping()
-		log.IfError(err)
+		if !ifError(err) {
+			fmt.Printf("connected to %s\n", db.Id)
+		}
 	}
 
 	return db.conn
@@ -85,7 +86,7 @@ func Get(id string) *Database {
 		}
 	}
 
-	log.Warnf("Unable to find database by id: %d", id)
+	fmt.Printf("Unable to find database by id: %d\n", id)
 
 	return nil
 }
@@ -101,9 +102,9 @@ func Conn(id string) *sql.DB {
 			// 		overhead/latency of the call
 			//
 			if err := d.conn.Ping(); err != nil {
-				log.Warnf("Error pinging db: %s", err)
+				fmt.Printf("Error pinging db: %s\n", err)
 				if err.Error() == "sql: database is closed" {
-					log.Notice("will attempt to reconnect")
+					fmt.Printf("will attempt to reconnect\n")
 				}
 				return d.Connect()
 			}
@@ -115,6 +116,17 @@ func Conn(id string) *sql.DB {
 	return nil
 }
 
+func Connx(id string) *sqlx.DB {
+
+	conn := Conn(id)
+	if conn == nil {
+		return nil
+	}
+
+	return sqlx.NewDb(conn, Get(id).Type)
+
+}
+
 func Check(id string) error {
 	conn := Conn(id)
 
@@ -124,37 +136,38 @@ func Check(id string) error {
 
 	err := conn.Ping()
 	if err != nil {
-		log.IfError(err)
+		ifError(err)
 		return err
 	}
 
 	rows, err := conn.Query(`SELECT NOW()`)
-	if err != nil {
-		log.IfError(err)
-		return err
-	}
 	defer rows.Close()
+	ifError(err)
 
-	log.Notice("Successfully connected to DB ID:", id)
+	if err == nil {
+		fmt.Printf("Successfully connected to DB %s", id)
+	}
 
 	return err
 
 }
 
 func Add(db Database) {
+	// make sure to always connect the database first
+	_ = db.Connect()
 
+	// check if database has already been added with the same ID
 	for i := range databases {
 		if db.Id == databases[i].Id {
-			log.Warnf("%s exists, overriding with new db", db.Id)
+			fmt.Printf("%s exists, overriding with new db\n", db.Id)
 			databases[i] = db
 			return
 		}
 	}
 
-	_ = db.Connect()
-
+	// append database since ID was not found
 	databases = append(databases, db)
-	log.Info("db.Add", db.Type, db.Id)
+	fmt.Printf("added %s database: %s\n", db.Type, db.Id)
 }
 
 func AddMySQL(id, host, port, name, user, pass string) {
@@ -187,4 +200,12 @@ func AddMock(id string) {
 		Type: "mock",
 		Id:   id,
 	})
+}
+
+func ifError(err error) bool {
+	if err != nil {
+		fmt.Println("Error (db):", err.Error())
+		return true
+	}
+	return false
 }
