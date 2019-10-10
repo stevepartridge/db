@@ -122,10 +122,7 @@ func NullBoolToBool(b *sql.NullBool) bool {
 	return false
 }
 
-func NullStringIfEmpty(s *string) sql.NullString {
-	if s == nil {
-		return sql.NullString{} 
-	}
+func NullStringIfEmpty(s string) sql.NullString {
     if len(s) == 0 {
         return sql.NullString{}
     }
@@ -133,4 +130,24 @@ func NullStringIfEmpty(s *string) sql.NullString {
          String: s,
          Valid: true,
     }
+}
+
+func NullInt32IfZero(i int) sql.NullInt32 {
+	if i == 0 {
+		return sql.NullInt32{}
+	}
+	return sql.NullInt32{
+		Int32: i,
+		Valid: true,
+	}
+}
+
+func NullInt64IfZero(i int) sql.NullInt64 {
+	if i == 0 {
+		return sql.NullInt64{}
+	}
+	return sql.NullInt64{
+		Int64: i,
+		Valid: true,
+	}
 }
