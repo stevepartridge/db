@@ -132,22 +132,22 @@ func NullStringIfEmpty(s string) sql.NullString {
     }
 }
 
-func NullInt32IfZero(i int) sql.NullInt32 {
-	if i == 0 {
-		return sql.NullInt32{}
-	}
-	return sql.NullInt32{
-		Int32: i,
-		Valid: true,
-	}
-}
+// func NullInt32IfZero(i int) sql.NullInt32 {
+// 	if i == 0 {
+// 		return sql.NullInt32{}
+// 	}
+// 	return sql.NullInt32{
+// 		Int32: int32(i),
+// 		Valid: true,
+// 	}
+// }
 
 func NullInt64IfZero(i int) sql.NullInt64 {
 	if i == 0 {
 		return sql.NullInt64{}
 	}
 	return sql.NullInt64{
-		Int64: i,
+		Int64: int64(i),
 		Valid: true,
 	}
 }
