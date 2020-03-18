@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"time"
 
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	_ "github.com/go-sql-driver/mysql"
@@ -12,23 +13,42 @@ import (
 )
 
 type Database struct {
-	Type    string
-	Id      string
-	Host    string
-	Port    string
-	Name    string
-	User    string
-	Pass    string
-	SSLMode string // postgres
-	conn    *sql.DB
-	Mock    sqlmock.Sqlmock
+	Type         string
+	Id           string
+	Host         string
+	Port         string
+	Name         string
+	User         string
+	Pass         string
+	SSLMode      string // postgres
+	conn         *sql.DB
+	connx        *sqlx.DB
+	Mock         sqlmock.Sqlmock
+	MaxOpenConns int
+	MaxIdleConns int
+
+	retries int
 }
 
 var (
+	MaxRetries = 0 // Infinite retries
+
 	databases []Database
 )
 
-func (db *Database) Connect() *sql.DB {
+func (db *Database) Connect(retry ...bool) *sql.DB {
+
+	if len(retry) > 0 && db.retries > 0 {
+		fmt.Printf("(%d) Attempting retry...\n", db.retries)
+	}
+
+	if db.MaxOpenConns == 0 {
+		db.MaxOpenConns = 25
+	}
+
+	if db.MaxIdleConns == 0 {
+		db.MaxIdleConns = 25
+	}
 
 	var (
 		host = db.Host
@@ -48,6 +68,8 @@ func (db *Database) Connect() *sql.DB {
 			host,
 			db.Name,
 		))
+		db.conn.SetMaxOpenConns(db.MaxOpenConns)
+		db.conn.SetMaxIdleConns(db.MaxIdleConns)
 
 	case "postgres":
 		db.conn, err = sql.Open("postgres", fmt.Sprintf(
@@ -64,14 +86,27 @@ func (db *Database) Connect() *sql.DB {
 		db.conn, db.Mock, err = sqlmock.New()
 
 	}
+	db.conn.SetMaxOpenConns(db.MaxOpenConns)
+	db.conn.SetMaxIdleConns(db.MaxIdleConns)
 
 	ifError(err)
 
 	if err == nil {
 		err = db.conn.Ping()
-		if !ifError(err) {
-			fmt.Printf("connected to %s\n", db.Id)
+		if ifError(err) {
+			db.retries++
+			if len(retry) > 0 {
+				if MaxRetries > 0 {
+					if db.retries > MaxRetries {
+						fmt.Printf("Reached max retries (%d), returning nil")
+						return nil
+					}
+				}
+			}
+			time.Sleep(2 * time.Second)
+			return db.Connect(true)
 		}
+		fmt.Printf("connected to %s\n", db.Id)
 	}
 
 	return db.conn
@@ -118,12 +153,39 @@ func Conn(id string) *sql.DB {
 
 func Connx(id string) *sqlx.DB {
 
-	conn := Conn(id)
-	if conn == nil {
-		return nil
-	}
+	d := Get(id)
+	if d != nil {
 
-	return sqlx.NewDb(conn, Get(id).Type)
+		if d.connx == nil {
+			if d.conn == nil {
+				d.Connect()
+			}
+
+			d.connx = sqlx.NewDb(d.conn, d.Type)
+			for i := range databases {
+				if databases[i].Id == id {
+					databases[i] = *d
+				}
+			}
+			return d.connx
+		}
+
+		// TODO:
+		// 		move this to a proactive approach,
+		// 		as not to avoid adding it to the
+		// 		overhead/latency of the call
+		//
+		if err := d.connx.Ping(); err != nil {
+			fmt.Printf("Error pinging db: %s\n", err)
+			if err.Error() == "sql: database is closed" {
+				fmt.Printf("will attempt to reconnect\n")
+			}
+			d.connx = sqlx.NewDb(d.conn, d.Type)
+
+			return d.connx
+		}
+	}
+	return nil
 
 }
 
@@ -145,7 +207,7 @@ func Check(id string) error {
 	ifError(err)
 
 	if err == nil {
-		fmt.Printf("Successfully connected to DB %s", id)
+		fmt.Printf("Successfully connected to DB %s\n", id)
 	}
 
 	return err
