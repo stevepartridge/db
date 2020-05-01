@@ -33,10 +33,10 @@ type Database struct {
 var (
 	MaxRetries = 0 // Infinite retries
 
-	databases []Database
+	databases []*Database
 )
 
-func (db *Database) Connect(retry ...bool) *sql.DB {
+func (db *Database) Connect(retry ...bool) {
 
 	if len(retry) > 0 && db.retries > 0 {
 		fmt.Printf("(%d) Attempting retry...\n", db.retries)
@@ -99,17 +99,19 @@ func (db *Database) Connect(retry ...bool) *sql.DB {
 				if MaxRetries > 0 {
 					if db.retries > MaxRetries {
 						fmt.Printf("Reached max retries (%d), returning nil")
-						return nil
+						return
 					}
 				}
 			}
 			time.Sleep(2 * time.Second)
-			return db.Connect(true)
+			db.Connect(true)
+			return
 		}
+
+		db.connx = sqlx.NewDb(db.conn, db.Type)
+
 		fmt.Printf("connected to %s\n", db.Id)
 	}
-
-	return db.conn
 
 }
 
@@ -117,7 +119,7 @@ func Get(id string) *Database {
 
 	for i := range databases {
 		if databases[i].Id == id {
-			return &databases[i]
+			return databases[i]
 		}
 	}
 
@@ -128,64 +130,50 @@ func Get(id string) *Database {
 
 func Conn(id string) *sql.DB {
 	d := Get(id)
-	if d != nil {
-		if d.conn != nil {
-
-			// TODO:
-			// 		move this to a proactive approach,
-			// 		as not to avoid adding it to the
-			// 		overhead/latency of the call
-			//
-			if err := d.conn.Ping(); err != nil {
-				fmt.Printf("Error pinging db: %s\n", err)
-				if err.Error() == "sql: database is closed" {
-					fmt.Printf("will attempt to reconnect\n")
-				}
-				return d.Connect()
-			}
-
-			return d.conn
-		}
-		return d.Connect()
+	if d == nil {
+		fmt.Printf("Database %s not found", d.Id)
+		return nil
 	}
-	return nil
+
+	if d.conn == nil {
+		d.Connect()
+	}
+
+	if d.conn != nil {
+		if err := d.conn.Ping(); err != nil {
+			fmt.Printf("Error pinging db (%s): %s\n", d.Id, err)
+			if err.Error() == "sql: database is closed" {
+				fmt.Printf("will attempt to reconnect\n")
+				d.Connect()
+			}
+		}
+	}
+
+	return d.conn
 }
 
 func Connx(id string) *sqlx.DB {
-
 	d := Get(id)
-	if d != nil {
+	if d == nil {
+		fmt.Printf("Database %s not found", d.Id)
+		return nil
+	}
 
-		if d.connx == nil {
-			if d.conn == nil {
-				d.Connect()
-			}
+	if d.conn == nil || d.connx == nil {
+		d.Connect()
+	}
 
-			d.connx = sqlx.NewDb(d.conn, d.Type)
-			for i := range databases {
-				if databases[i].Id == id {
-					databases[i] = *d
-				}
-			}
-			return d.connx
-		}
-
-		// TODO:
-		// 		move this to a proactive approach,
-		// 		as not to avoid adding it to the
-		// 		overhead/latency of the call
-		//
+	if d.connx != nil {
 		if err := d.connx.Ping(); err != nil {
-			fmt.Printf("Error pinging db: %s\n", err)
+			fmt.Printf("Error pinging db (%s): %s\n", d.Id, err)
 			if err.Error() == "sql: database is closed" {
 				fmt.Printf("will attempt to reconnect\n")
+				d.Connect()
 			}
-			d.connx = sqlx.NewDb(d.conn, d.Type)
-
-			return d.connx
 		}
 	}
-	return nil
+
+	return d.connx
 
 }
 
@@ -216,20 +204,21 @@ func Check(id string) error {
 
 func Add(db Database) {
 	// make sure to always connect the database first
-	_ = db.Connect()
 
 	// check if database has already been added with the same ID
 	for i := range databases {
 		if db.Id == databases[i].Id {
 			fmt.Printf("%s exists, overriding with new db\n", db.Id)
-			databases[i] = db
-			return
+			databases[i] = &db
+			break
 		}
 	}
 
+	db.Connect()
+
 	// append database since ID was not found
-	databases = append(databases, db)
-	fmt.Printf("added %s database: %s\n", db.Type, db.Id)
+	databases = append(databases, &db)
+	fmt.Printf("Added %s database: %s\n", db.Type, db.Id)
 }
 
 func AddMySQL(id, host, port, name, user, pass string) {
